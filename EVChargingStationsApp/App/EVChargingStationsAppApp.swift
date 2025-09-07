@@ -12,6 +12,7 @@ struct EVChargingStationsApp: App {
     private let networkClient: NetworkClient
     private let openChargeService: OpenChargeMapService
     private let stationsViewModel: ChargingStationsViewModel
+    private let locationManager = LocationManager()
 
     init() {
         // Network + Service
@@ -20,7 +21,8 @@ struct EVChargingStationsApp: App {
 
         // ViewModel
         self.stationsViewModel = ChargingStationsViewModel(
-            service: openChargeService
+            service: openChargeService,
+            locationProvider: locationManager
         )
     }
 

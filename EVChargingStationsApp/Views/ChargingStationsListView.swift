@@ -12,7 +12,7 @@ import MapKit
 
 /// Displays a list of nearby charging stations.
 /// - Uses a `ChargingStationsViewModel` for state and data.
-/// - Handles loading, error, and success states.
+/// - Handles loading, error, success, and "retry without location" flows.
 /// - Navigates to `ChargingStationDetailView` on row selection.
 public struct ChargingStationsListView: View {
     @StateObject private var viewModel: ChargingStationsViewModel
@@ -39,9 +39,16 @@ public struct ChargingStationsListView: View {
                         .foregroundColor(.secondary)
 
                     Button("Retry") {
-                        viewModel.fetchChargingStations()
+                        viewModel.fetchChargingStations(useLocation: true)
                     }
                     .padding(.top)
+
+                    if viewModel.showRetryWithoutLocation {
+                        Button("Retry without location") {
+                            viewModel.retryWithoutLocation()
+                        }
+                        .padding(.top, 6)
+                    }
                 }
                 .padding()
             } else {
@@ -56,20 +63,21 @@ public struct ChargingStationsListView: View {
                 }
                 .listStyle(.insetGrouped)
                 .refreshable {
-                    viewModel.fetchChargingStations()
+                    viewModel.fetchChargingStations(useLocation: true)
                 }
             }
         }
         .navigationTitle("Nearby Stations")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            viewModel.fetchChargingStations()
+            viewModel.fetchChargingStations(useLocation: true)
         }
     }
 }
 
 // MARK: - ChargingStationRowView
 
+/// Compact row representation of a single charging station.
 private struct ChargingStationRowView: View {
     let chargingStation: ChargingStation
 

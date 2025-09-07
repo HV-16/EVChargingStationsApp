@@ -5,6 +5,7 @@
 //  Created by Harshith Bhupal Vakeel on 9/7/25.
 //
 
+import CoreLocation
 import Foundation
 import SwiftUI
 
@@ -14,11 +15,13 @@ public final class ChargingStationsViewModel: ObservableObject {
     @Published public private(set) var chargingStations: [ChargingStation] = []
     @Published public private(set) var isLoading: Bool = false
     @Published public private(set) var errorMessage: String?
+    @Published public private(set) var isOffline: Bool = false
     @Published public private(set) var showRetryWithoutLocation: Bool = false
     @Published public var selectedStation: ChargingStation?
 
     // MARK: - Dependencies
     private let service: OpenChargeMapServiceProtocol
+    private let locationProvider: LocationProvider
 
     // MARK: - Config
     public var defaultDistanceKm: Double = 20
@@ -26,38 +29,45 @@ public final class ChargingStationsViewModel: ObservableObject {
     private var currentLoadTask: Task<Void, Never>?
 
     // MARK: - Init
-    public init(service: OpenChargeMapServiceProtocol) {
+    public init(
+        service: OpenChargeMapServiceProtocol,
+        locationProvider: LocationProvider
+    ) {
         self.service = service
+        self.locationProvider = locationProvider
     }
 
     // MARK: - Public API
 
-    /// Fetch charging stations from API.
-    public func fetchChargingStations() {
+    /// Fetch charging stations. If `useLocation` is true, attempt a location-centered search first.
+    /// If `useLocation` is false, uses the generic (no-location) endpoint.
+    public func fetchChargingStations(useLocation: Bool) {
         currentLoadTask?.cancel()
 
         currentLoadTask = Task { [weak self] in
-            guard let self else { return }
+            guard let self = self else { return }
             self.isLoading = true
             self.errorMessage = nil
+            self.isOffline = false
             self.showRetryWithoutLocation = false
 
+            // If offline, return an error (no persistence/cache in this variant).
             if !NetworkMonitor.shared.isConnected {
                 self.errorMessage = "No internet connection."
                 self.isLoading = false
                 self.currentLoadTask = nil
+                self.isOffline = true
                 return
             }
 
-            await self.getChargingStations(
-                latitude: nil,
-                longitude: nil,
-                distance: defaultDistanceKm,
-                results: defaultMaxResults
-            )
+            // Online → attempt fetch (location preferred if requested)
+            await self.performOnlineFetch(useLocation: useLocation, distance: defaultDistanceKm, results: defaultMaxResults)
 
-            if self.chargingStations.isEmpty && self.errorMessage == nil {
-                self.errorMessage = "No stations found."
+            // If caller asked for location and we returned 0 results and there was no network error,
+            // expose retry-without-location option so user can try a generic fetch.
+            if useLocation && self.chargingStations.isEmpty && self.errorMessage == nil {
+                self.errorMessage = "No stations found nearby."
+                self.showRetryWithoutLocation = true
             }
 
             self.isLoading = false
@@ -65,7 +75,43 @@ public final class ChargingStationsViewModel: ObservableObject {
         }
     }
 
+    /// Retry fetching but explicitly without using location (calls generic endpoint).
+    public func retryWithoutLocation() {
+        errorMessage = nil
+        showRetryWithoutLocation = false
+        fetchChargingStations(useLocation: false)
+    }
+
     // MARK: - Private helpers
+
+    /// Attempt to fetch stations when online. If useLocation==true, tries to obtain device location and
+    /// performs a location-based fetch; if location fails we'll try generic fetch.
+    private func performOnlineFetch(useLocation: Bool, distance: Double, results: Int) async {
+        if useLocation {
+            do {
+                let coordinate = try await locationProvider.currentLocation()
+                await getChargingStations(
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude,
+                    distance: distance,
+                    results: results
+                )
+                // success path handled inside getChargingStations
+                return
+            } catch {
+                // If location fetch fails, fall-through to generic fetch
+                await getChargingStations(
+                    latitude: nil,
+                    longitude: nil,
+                    distance: distance,
+                    results: results
+                )
+                return
+            }
+        } else {
+            await getChargingStations(latitude: nil, longitude: nil, distance: distance, results: results)
+        }
+    }
 
     private func getChargingStations(
         latitude: Double?,
@@ -81,9 +127,12 @@ public final class ChargingStationsViewModel: ObservableObject {
                 maxResults: results
             )
             chargingStations = fetched
+            isOffline = false
             errorMessage = nil
             showRetryWithoutLocation = false
         } catch {
+            // No cache fallback here — show the error
+            chargingStations = []
             errorMessage = error.localizedDescription
             showRetryWithoutLocation = false
         }
