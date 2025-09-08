@@ -13,16 +13,19 @@ struct EVChargingStationsApp: App {
     private let openChargeService: OpenChargeMapService
     private let stationsViewModel: ChargingStationsViewModel
     private let locationManager = LocationManager()
+    private let persistence: PersistenceController
 
     init() {
         // Network + Service
         self.networkClient = NetworkClient(session: .shared, requestTimeout: 30)
         self.openChargeService = OpenChargeMapService(client: networkClient)
+        self.persistence = .shared
 
         // ViewModel
         self.stationsViewModel = ChargingStationsViewModel(
             service: openChargeService,
-            locationProvider: locationManager
+            locationProvider: locationManager,
+            persistence: persistence
         )
     }
 

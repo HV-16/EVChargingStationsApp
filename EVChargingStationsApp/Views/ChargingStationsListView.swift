@@ -12,7 +12,7 @@ import MapKit
 
 /// Displays a list of nearby charging stations.
 /// - Uses a `ChargingStationsViewModel` for state and data.
-/// - Handles loading, error, success, and "retry without location" flows.
+/// - Handles loading, error, success, and offline states.
 /// - Navigates to `ChargingStationDetailView` on row selection.
 public struct ChargingStationsListView: View {
     @StateObject private var viewModel: ChargingStationsViewModel
@@ -52,18 +52,30 @@ public struct ChargingStationsListView: View {
                 }
                 .padding()
             } else {
-                List {
-                    ForEach(viewModel.chargingStations) { station in
-                        NavigationLink(
-                            destination: ChargingStationDetailView(chargingStation: station)
-                        ) {
-                            ChargingStationRowView(chargingStation: station)
+                VStack(spacing: 0) {
+                    if viewModel.isOffline {
+                        Text("No internet connection — showing cached results")
+                            .font(.footnote)
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(8)
+                            .background(Color.yellow.opacity(0.95))
+                            .listRowInsets(EdgeInsets())
+                    }
+
+                    List {
+                        ForEach(viewModel.chargingStations) { station in
+                            NavigationLink(
+                                destination: ChargingStationDetailView(chargingStation: station)
+                            ) {
+                                ChargingStationRowView(chargingStation: station)
+                            }
                         }
                     }
-                }
-                .listStyle(.insetGrouped)
-                .refreshable {
-                    viewModel.fetchChargingStations(useLocation: true)
+                    .listStyle(.insetGrouped)
+                    .refreshable {
+                        viewModel.fetchChargingStations(useLocation: true)
+                    }
                 }
             }
         }
@@ -78,6 +90,7 @@ public struct ChargingStationsListView: View {
 // MARK: - ChargingStationRowView
 
 /// Compact row representation of a single charging station.
+/// Displays title and subtitle (town/state or address).
 private struct ChargingStationRowView: View {
     let chargingStation: ChargingStation
 

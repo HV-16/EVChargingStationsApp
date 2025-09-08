@@ -22,6 +22,7 @@ public final class ChargingStationsViewModel: ObservableObject {
     // MARK: - Dependencies
     private let service: OpenChargeMapServiceProtocol
     private let locationProvider: LocationProvider
+    private let persistence: PersistenceProtocol
 
     // MARK: - Config
     public var defaultDistanceKm: Double = 20
@@ -31,10 +32,12 @@ public final class ChargingStationsViewModel: ObservableObject {
     // MARK: - Init
     public init(
         service: OpenChargeMapServiceProtocol,
-        locationProvider: LocationProvider
+        locationProvider: LocationProvider,
+        persistence: PersistenceProtocol
     ) {
         self.service = service
         self.locationProvider = locationProvider
+        self.persistence = persistence
     }
 
     // MARK: - Public API
@@ -51,21 +54,27 @@ public final class ChargingStationsViewModel: ObservableObject {
             self.isOffline = false
             self.showRetryWithoutLocation = false
 
-            // If offline, return an error (no persistence/cache in this variant).
+            // If offline, try cache first and return an appropriate message if empty.
             if !NetworkMonitor.shared.isConnected {
-                self.errorMessage = "No internet connection."
+                let cached = self.persistence.fetchStations()
+                if !cached.isEmpty {
+                    self.chargingStations = cached
+                    self.isOffline = true
+                    self.errorMessage = nil
+                } else {
+                    self.errorMessage = "No internet connection and no cached data available."
+                }
                 self.isLoading = false
                 self.currentLoadTask = nil
-                self.isOffline = true
                 return
             }
 
             // Online → attempt fetch (location preferred if requested)
             await self.performOnlineFetch(useLocation: useLocation, distance: defaultDistanceKm, results: defaultMaxResults)
 
-            // If caller asked for location and we returned 0 results and there was no network error,
-            // expose retry-without-location option so user can try a generic fetch.
+            // If caller asked for location and we returned 0 results, expose retry-without-location option
             if useLocation && self.chargingStations.isEmpty && self.errorMessage == nil {
+                // If we got empty result set (no stations found nearby)
                 self.errorMessage = "No stations found nearby."
                 self.showRetryWithoutLocation = true
             }
@@ -127,12 +136,24 @@ public final class ChargingStationsViewModel: ObservableObject {
                 maxResults: results
             )
             chargingStations = fetched
+            persistence.saveStations(fetched)
             isOffline = false
             errorMessage = nil
             showRetryWithoutLocation = false
         } catch {
-            // No cache fallback here — show the error
-            chargingStations = []
+            fallbackToCacheOrError(error)
+        }
+    }
+
+    /// If network fetch fails, attempt to display cached data if present; otherwise show the error.
+    private func fallbackToCacheOrError(_ error: Error) {
+        let cached = persistence.fetchStations()
+        if !cached.isEmpty {
+            chargingStations = cached
+            isOffline = true
+            errorMessage = nil
+            showRetryWithoutLocation = false
+        } else {
             errorMessage = error.localizedDescription
             showRetryWithoutLocation = false
         }
